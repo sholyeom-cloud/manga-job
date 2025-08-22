@@ -1,0 +1,28 @@
+name: Manga Job
+
+on:
+  schedule:
+    - cron: "0 9 * * *"   # runs every day at 09:00 UTC
+  workflow_dispatch:      # lets you run it manually too
+
+jobs:
+  run-manga:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run script
+        run: python main.py
+        env:
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
