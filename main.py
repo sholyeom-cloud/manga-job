@@ -1,4 +1,3 @@
-# (Full script - copy this entire block)
 import os
 import time
 import json
@@ -19,12 +18,8 @@ EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER", EMAIL_SENDER)
 if not EMAIL_SENDER or not EMAIL_APP_PASSWORD:
     raise SystemExit("[FATAL] Missing EMAIL_SENDER or EMAIL_APP_PASSWORD env vars.")
 
-# Time zone for "run only at this local hour" guard
-#TZ = os.getenv("TZ", "Europe/Ljubljana")         # local zone for logs / guard
-#RUN_LOCAL_HOUR = int(os.getenv("RUN_LOCAL_HOUR", "9"))  # 9 = 09:00 local
-
+# Time zone (always UTC inside GitHub Actions)
 os.environ["TZ"] = "UTC"
-
 try:
     time.tzset()  # works on Linux runners
 except Exception:
@@ -199,12 +194,6 @@ def send_email(subject, body, attachments):
 # Main
 # ----------------------
 def main():
-    # Run-at-local-hour guard so we can schedule two UTC times (DST-safe)
-    #now = dt.datetime.now()
-    #if now.hour != RUN_LOCAL_HOUR:
-       # print(f"[INFO] Skipping run: local hour {now.hour} != {RUN_LOCAL_HOUR}")
-        #return
-
     manga = search_manga(HARDCODED_MANGA_TITLE)
     if not manga:
         return
