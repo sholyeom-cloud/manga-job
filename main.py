@@ -200,10 +200,10 @@ def send_email(subject, body, attachments):
 # ----------------------
 def main():
     # Run-at-local-hour guard so we can schedule two UTC times (DST-safe)
-    now = dt.datetime.now()
-    if now.hour != RUN_LOCAL_HOUR:
-        print(f"[INFO] Skipping run: local hour {now.hour} != {RUN_LOCAL_HOUR}")
-        return
+    #now = dt.datetime.now()
+    #if now.hour != RUN_LOCAL_HOUR:
+       # print(f"[INFO] Skipping run: local hour {now.hour} != {RUN_LOCAL_HOUR}")
+        #return
 
     manga = search_manga(HARDCODED_MANGA_TITLE)
     if not manga:
