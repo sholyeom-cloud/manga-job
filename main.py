@@ -23,7 +23,8 @@ if not EMAIL_SENDER or not EMAIL_APP_PASSWORD:
 #TZ = os.getenv("TZ", "Europe/Ljubljana")         # local zone for logs / guard
 #RUN_LOCAL_HOUR = int(os.getenv("RUN_LOCAL_HOUR", "9"))  # 9 = 09:00 local
 
-os.environ["TZ"] = TZ
+os.environ["TZ"] = "UTC"
+
 try:
     time.tzset()  # works on Linux runners
 except Exception:
