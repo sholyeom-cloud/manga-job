@@ -20,8 +20,8 @@ if not EMAIL_SENDER or not EMAIL_APP_PASSWORD:
     raise SystemExit("[FATAL] Missing EMAIL_SENDER or EMAIL_APP_PASSWORD env vars.")
 
 # Time zone for "run only at this local hour" guard
-TZ = os.getenv("TZ", "Europe/Ljubljana")         # local zone for logs / guard
-RUN_LOCAL_HOUR = int(os.getenv("RUN_LOCAL_HOUR", "9"))  # 9 = 09:00 local
+#TZ = os.getenv("TZ", "Europe/Ljubljana")         # local zone for logs / guard
+#RUN_LOCAL_HOUR = int(os.getenv("RUN_LOCAL_HOUR", "9"))  # 9 = 09:00 local
 
 os.environ["TZ"] = TZ
 try:
