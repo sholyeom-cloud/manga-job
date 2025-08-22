@@ -8,9 +8,28 @@ on:
 jobs:
   run-manga:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+
+      # --- Restore the most recent progress.json snapshot ---
+      - name: Restore progress.json cache
+        id: cache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: progress.json
+          key: manga-progress-${{ github.run_id }}
+          restore-keys: |
+            manga-progress-
+
+      - name: Ensure progress.json exists
+        run: |
+          if [ ! -f progress.json ]; then
+            echo '{"chapter_num": "1", "page_num": 0}' > progress.json
+          fi
+          echo "Initial progress.json:"
+          cat progress.json
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -26,3 +45,16 @@ jobs:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+
+      - name: Show updated progress.json
+        if: always()
+        run: |
+          echo "Updated progress.json:"
+          cat progress.json || true
+
+      # --- Save a new snapshot so next run restores this one ---
+      - name: Save progress.json cache
+        uses: actions/cache/save@v4
+        with:
+          path: progress.json
+          key: manga-progress-${{ github.run_id }}
