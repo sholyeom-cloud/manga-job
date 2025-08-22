@@ -39,7 +39,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_FOLDER = os.path.join(BASE_DIR, "downloaded_manga")
 PROGRESS_FILE = os.path.join(BASE_DIR, "progress.json")
 
-HARDCODED_MANGA_TITLE = "メイドインアビス"
+HARDCODED_MANGA_TITLE = "Igyou Atama-San To Ningen-Chan"
 MIN_IMAGES_TO_DOWNLOAD = 15
 
 TIKTOK_HASHTAGS = (
