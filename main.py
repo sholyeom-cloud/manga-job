@@ -4,44 +4,29 @@ import json
 import requests
 import smtplib
 import random
-import datetime as dt
+import datetime
+from datetime import timedelta
 from email.message import EmailMessage
 
 # ----------------------
-# Config from environment (set via GitHub Secrets)
+# Config
 # ----------------------
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
 EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER", EMAIL_SENDER)
 
-# Safety checks
 if not EMAIL_SENDER or not EMAIL_APP_PASSWORD:
     raise SystemExit("[FATAL] Missing EMAIL_SENDER or EMAIL_APP_PASSWORD env vars.")
 
-# Time zone (always UTC inside GitHub Actions)
-os.environ["TZ"] = "UTC"
-try:
-    time.tzset()  # works on Linux runners
-except Exception:
-    pass
-
 # ----------------------
-# Paths & constants
+# Paths & Constants
 # ----------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Put downloads in workspace but keep them OUT of git (see .gitignore)
 DOWNLOAD_FOLDER = os.path.join(BASE_DIR, "downloaded_manga")
-PROGRESS_FILE = os.path.join(BASE_DIR, "progress.json")
+HISTORY_FILE = os.path.join(BASE_DIR, "sent_history.json")
 
-HARDCODED_MANGA_TITLE = "Igyou Atama-San To Ningen-Chan"
-MIN_IMAGES_TO_DOWNLOAD = 10
-
-TIKTOK_HASHTAGS = (
-    "FOLOW OR LIKE IF YOU WANT MORE "
-    "#manga #anime #mangadex #mangareader #otaku #animeedit "
-    "#mangacollection #fyp #foryoupage #mangarecomandation #isekai #romance #actionmanga"
-)
+IMAGES_TO_DOWNLOAD = 10 
+BASE_HASHTAGS = "#manga #manhwa #newmanga #mangarecommendation #mangadex #fyp #anime #otaku #hiddenmanga"
 
 JOKES = [
     "Why don't manga characters ever get lost? Because they always follow the plot!",
@@ -52,192 +37,136 @@ JOKES = [
 ]
 
 # ----------------------
-# Progress helpers
+# Logic
 # ----------------------
-def save_progress(chapter_num, page_num):
-    data = {"chapter_num": chapter_num, "page_num": page_num}
-    with open(PROGRESS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f)
-    print(f"[INFO] Progress saved: chapter {chapter_num}, page {page_num}")
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return []
 
-def load_progress():
-    if os.path.exists(PROGRESS_FILE):
-        with open(PROGRESS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data.get("chapter_num", "1"), int(data.get("page_num", 0))
-    return "1", 0
+def save_history(sent_id):
+    history = load_history()
+    if sent_id not in history:
+        history.append(sent_id)
+        with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(history, f)
 
-# ----------------------
-# MangaDex API helpers
-# ----------------------
-def search_manga(title):
-    print(f"[INFO] Searching manga: {title}")
-    url = f"https://api.mangadex.org/manga?title={title}&limit=1"
-    resp = requests.get(url, timeout=30)
-    if resp.status_code != 200:
-        print(f"[ERROR] search_manga: {resp.status_code} {resp.text}")
-        return None
-    data = resp.json()
-    if data.get("data"):
-        manga = data["data"][0]
-        manga_id = manga["id"]
-        manga_title = (
-            manga["attributes"]["title"].get("en")
-            or next(iter(manga["attributes"]["title"].values()))
-        )
-        return manga_id, manga_title
-    print("[WARN] No manga found")
-    return None
+def get_fresh_trending_manga():
+    print("[INFO] Searching for NEW & TRENDING Manga/Manhwa...")
+    history = load_history()
+    thirty_days_ago = datetime.datetime.now() - timedelta(days=30)
+    date_str = thirty_days_ago.strftime("%Y-%m-%dT%H:%M:%S")
 
-def get_all_chapters(manga_id):
-    print(f"[INFO] Fetching all chapters for ID: {manga_id}")
-    chapters, offset, limit = [], 0, 100
-    while True:
-        url = (
-            "https://api.mangadex.org/chapter"
-            f"?manga={manga_id}&order[chapter]=asc&limit={limit}&offset={offset}&translatedLanguage[]=en"
-        )
-        resp = requests.get(url, timeout=30)
-        if resp.status_code != 200:
-            print(f"[ERROR] get_all_chapters: {resp.status_code} {resp.text}")
-            break
+    url = "https://api.mangadex.org/manga"
+    params = {
+        "limit": 50,
+        "order[followedCount]": "desc",
+        "createdAtSince": date_str,
+        "includes[]": "cover_art",
+        "originalLanguage[]": ["ja", "ko"],
+        "contentRating[]": ["safe", "suggestive"]
+    }
+
+    try:
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
         data = resp.json()
-        chapters.extend(data.get("data", []))
-        total = data.get("total", 0)
-        offset += limit
-        if offset >= total:
-            break
-    # Keep only numeric chapters
-    filtered = [
-        c for c in chapters
-        if (c["attributes"].get("chapter") or "").replace('.', '', 1).isdigit()
-    ]
-    filtered.sort(key=lambda c: float(c["attributes"]["chapter"]))
-    return filtered
+        
+        for manga in data.get("data", []):
+            manga_id = manga["id"]
+            if manga_id not in history:
+                title = manga["attributes"]["title"].get("en") or next(iter(manga["attributes"]["title"].values()))
+                genres = [t["attributes"]["name"]["en"] for t in manga["attributes"]["tags"] if t["type"] == "tag"]
+                return {
+                    "id": manga_id, "title": title, "genres": genres,
+                    "desc": manga["attributes"]["description"].get("en", "")[:250] + "..."
+                }
+        return None
+    except Exception:
+        return None
 
-def download_chapter_images(chapter, folder, start_page=0):
+def get_first_chapter(manga_id):
+    url = "https://api.mangadex.org/chapter"
+    params = {"manga": manga_id, "translatedLanguage[]": "en", "order[chapter]": "asc", "limit": 100}
+    try:
+        resp = requests.get(url, params=params, timeout=30)
+        data = resp.json()
+        for chapter in data.get("data", []):
+            ch_num = chapter["attributes"].get("chapter", "")
+            if ch_num == "1" or ch_num == "0" or (ch_num and ch_num.replace('.', '', 1).isdigit()):
+                return chapter
+        return None
+    except Exception:
+        return None
+
+def download_images(chapter, folder):
     chapter_id = chapter["id"]
-    chapter_num = chapter["attributes"].get("chapter") or "Unknown"
-    print(f"[INFO] Downloading chapter {chapter_num} (start page {start_page+1})")
-
     url = f"https://api.mangadex.org/at-home/server/{chapter_id}"
-    resp = requests.get(url, timeout=30)
-    if resp.status_code != 200:
-        print(f"[ERROR] get server: {resp.status_code} {resp.text}")
+    try:
+        resp = requests.get(url, timeout=30)
+        data = resp.json()
+        base_url = data["baseUrl"]
+        hash_code = data["chapter"]["hash"]
+        files = data["chapter"]["data"]
+        os.makedirs(folder, exist_ok=True)
+        downloaded_paths = []
+
+        for i, filename in enumerate(files[:IMAGES_TO_DOWNLOAD]):
+            img_url = f"{base_url}/data/{hash_code}/{filename}"
+            ext = filename.split(".")[-1]
+            local_path = os.path.join(folder, f"page_{i+1:02d}.{ext}")
+            r = requests.get(img_url, timeout=30)
+            if r.status_code == 200:
+                with open(local_path, "wb") as f:
+                    f.write(r.content)
+                downloaded_paths.append(local_path)
+        return downloaded_paths
+    except Exception:
         return []
 
-    data = resp.json()
-    base_url, ch = data.get("baseUrl"), data.get("chapter")
-    if not base_url or not ch:
-        print("[ERROR] Incomplete at-home data")
-        return []
-
-    hash_code, data_files = ch.get("hash"), ch.get("data")
-    if not hash_code or not data_files:
-        print("[ERROR] Missing hash or file list")
-        return []
-
-    os.makedirs(folder, exist_ok=True)
-    downloaded = []
-    for i, file_name in enumerate(data_files[start_page:], start=start_page+1):
-        img_url = f"{base_url}/data/{hash_code}/{file_name}"
-        filename = f"chapter_{chapter_num}_page_{i}.{file_name.split('.')[-1]}"
-        filepath = os.path.join(folder, filename)
-        try:
-            r = requests.get(img_url, stream=True, timeout=30)
-            r.raise_for_status()
-            with open(filepath, "wb") as f:
-                for chunk in r.iter_content(8192):
-                    f.write(chunk)
-            downloaded.append(filepath)
-            print(f"[OK] {filename}")
-        except Exception as e:
-            print(f"[FAIL] {filename}: {e}")
-        if len(downloaded) >= MIN_IMAGES_TO_DOWNLOAD:
-            break
-    return downloaded
-
-# ----------------------
-# Email sender
-# ----------------------
-def send_email(subject, body, attachments):
+def send_email(manga_info, image_paths):
+    genre_tags = " ".join([f"#{g.replace(' ', '')}" for g in manga_info['genres']])
+    title_tag = "#" + "".join(e for e in manga_info['title'] if e.isalnum())
+    final_hashtags = f"{BASE_HASHTAGS} {genre_tags} {title_tag}"
     joke = random.choice(JOKES)
-    full_body = f"{body}\n\nJoke of the day:\n{joke}\n\nHashtags:\n{TIKTOK_HASHTAGS}"
+    
+    subject = f"📈 New & Trending: {manga_info['title']}"
+    body = (f"🔥 FRESH TRENDING MANGA 🔥\n\nTitle: {manga_info['title']}\n"
+            f"Description: {manga_info['desc']}\n\n--- TIKTOK CAPTION ---\n\n"
+            f"New Manga Alert! 🚨 {manga_info['title']} 📚\n\n{final_hashtags}\n\n"
+            f"-------------------------\nBot Joke: {joke}")
 
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = EMAIL_SENDER
     msg["To"] = EMAIL_RECEIVER
-    msg.set_content(full_body)
+    msg.set_content(body)
 
-    for filepath in attachments:
-        try:
-            with open(filepath, "rb") as f:
-                data = f.read()
-            fname = os.path.basename(filepath)
-            subtype = fname.split(".")[-1].lower()
-            if subtype == "jpg":
-                subtype = "jpeg"
-            msg.add_attachment(data, maintype="image", subtype=subtype, filename=fname)
-        except Exception as e:
-            print(f"[WARN] Could not attach {filepath}: {e}")
+    for filepath in image_paths:
+        with open(filepath, "rb") as f:
+            file_name = os.path.basename(filepath)
+            subtype = file_name.split(".")[-1].lower()
+            if subtype == "jpg": subtype = "jpeg"
+            msg.add_attachment(f.read(), maintype="image", subtype=subtype, filename=file_name)
 
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
             smtp.login(EMAIL_SENDER, EMAIL_APP_PASSWORD)
             smtp.send_message(msg)
-        print("[INFO] Email sent successfully")
-    except Exception as e:
-        print(f"[ERROR] Email failed: {e}")
+        return True
+    except Exception:
+        return False
 
-# ----------------------
-# Main
-# ----------------------
 def main():
-    manga = search_manga(HARDCODED_MANGA_TITLE)
-    if not manga:
-        return
-    manga_id, manga_title = manga
-    print(f"[INFO] Found manga: {manga_title}")
-
-    chapters = get_all_chapters(manga_id)
-    if not chapters:
-        print("[WARN] No chapters found")
-        return
-
-    last_chapter, last_page = load_progress()
-    print(f"[INFO] Resuming from chapter {last_chapter}, page {last_page+1}")
-
-    downloaded = []
-    for chapter in chapters:
-        ch_str = chapter["attributes"].get("chapter")
-        if not ch_str or not ch_str.replace(".", "", 1).isdigit():
-            continue
-        ch_num = float(ch_str)
-
-        if ch_num < float(last_chapter):
-            continue
-
-        start_page = 0
-        if ch_num == float(last_chapter):
-            start_page = last_page + 1
-
-        folder = os.path.join(DOWNLOAD_FOLDER, f"{manga_title}_Chapter_{ch_str}")
-        files = download_chapter_images(chapter, folder, start_page)
-        downloaded.extend(files)
-
-        if files:
-            save_progress(ch_str, start_page + len(files) - 1)
-
-        if len(downloaded) >= MIN_IMAGES_TO_DOWNLOAD:
-            break
-
-    if downloaded:
-        subject = f"{manga_title} - {len(downloaded)} new images"
-        body = f"Downloaded {len(downloaded)} pages starting from chapter {last_chapter}."
-        send_email(subject, body, downloaded)
-    else:
-        print("[INFO] Nothing new downloaded")
+    manga = get_fresh_trending_manga()
+    if manga:
+        chapter = get_first_chapter(manga["id"])
+        if chapter:
+            folder = os.path.join(DOWNLOAD_FOLDER, "temp_chapter")
+            images = download_images(chapter, folder)
+            if images and send_email(manga, images):
+                save_history(manga["id"])
 
 if __name__ == "__main__":
     main()
