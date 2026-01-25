@@ -1,60 +1,42 @@
-name: Manga Job
+name: Daily Manga Bot
 
 on:
   schedule:
-    - cron: "0 9 * * *"   # runs every day at 09:00 UTC
-  workflow_dispatch:      # lets you run it manually too
+    # Runs at 07:00 UTC every day
+    - cron: '0 7 * * *'
+  workflow_dispatch: # Allows you to run it manually to test
+
+permissions:
+  contents: write  # THIS IS REQUIRED TO SAVE HISTORY
 
 jobs:
-  run-manga:
+  run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout code
         uses: actions/checkout@v3
-
-      # --- Restore the most recent progress.json snapshot ---
-      - name: Restore progress.json cache
-        id: cache-restore
-        uses: actions/cache/restore@v4
-        with:
-          path: progress.json
-          key: manga-progress-${{ github.run_id }}
-          restore-keys: |
-            manga-progress-
-
-      - name: Ensure progress.json exists
-        run: |
-          if [ ! -f progress.json ]; then
-            echo '{"chapter_num": "1", "page_num": 0}' > progress.json
-          fi
-          echo "Initial progress.json:"
-          cat progress.json
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.x"
+          python-version: '3.9'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install -r requirements.txt
 
-      - name: Run script
-        run: python main.py
+      - name: Run Manga Bot
         env:
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           EMAIL_RECEIVER: ${{ secrets.EMAIL_RECEIVER }}
+        run: python main.py
 
-      - name: Show updated progress.json
-        if: always()
+      - name: Save Sent History
         run: |
-          echo "Updated progress.json:"
-          cat progress.json || true
-
-      # --- Save a new snapshot so next run restores this one ---
-      - name: Save progress.json cache
-        uses: actions/cache/save@v4
-        with:
-          path: progress.json
-          key: manga-progress-${{ github.run_id }}
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add sent_history.json
+          git commit -m "Update sent history [skip ci]" || echo "No changes to commit"
+          git push
